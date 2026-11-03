@@ -20,6 +20,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -31,9 +32,10 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Главный экран. Тёмный графит, золотой акцент, крупные скругления.
- * Сверху вниз: сколько прошёл, сколько не хватает, деньги за сегодня, кнопки,
- * общий итог, история по дням.
+ * Три вкладки с плавающей нижней панелью (как в референсе):
+ *  0. Сегодня: сколько прошёл, сколько не хватает, деньги за день, старт/стоп.
+ *  1. История: общий итог штрафов и список прошлых дней.
+ *  2. Цель: условия обязательства, настройка работы в фоне, проверка точности счёта.
  */
 public class MainActivity extends Activity {
     // Палитра
@@ -50,15 +52,25 @@ public class MainActivity extends Activity {
     private static final int MATCH = LinearLayout.LayoutParams.MATCH_PARENT;
     private static final int WRAP = LinearLayout.LayoutParams.WRAP_CONTENT;
 
+    private static final String[] TAB_NAMES = {"Сегодня", "История", "Цель"};
+
     private Store store;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
+    private final View[] pages = new View[3];
+    private final TextView[] navItems = new TextView[3];
+    private int selectedTab = 0;
+
+    // Вкладка "Сегодня"
     private TextView dateView, stateChip, stepsView, missingView, moneyView;
-    private TextView totalValueView, totalInfoView, compareView;
     private Button toggle;
     private View barFill;
     private GradientDrawable barFillBg;
+    // Вкладка "История"
+    private TextView totalValueView, totalInfoView;
     private LinearLayout historyBox;
+    // Вкладка "Цель"
+    private TextView goalValueView, goalInfoView, compareView;
 
     private Boolean lastRunning;   // чтобы не перерисовывать кнопку и метку каждую секунду
     private String lastHistorySig; // то же для списка истории
@@ -75,6 +87,13 @@ public class MainActivity extends Activity {
         super.onCreate(b);
         store = new Store(this);
         buildUi();
+        select(b != null ? b.getInt("tab", 0) : 0);
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        out.putInt("tab", selectedTab);
     }
 
     // ---------- Помощники для построения интерфейса ----------
@@ -132,32 +151,81 @@ public class MainActivity extends Activity {
         b.setBackground(round(primary ? GOLD : CARD2, 26));
     }
 
+    /** Создаёт прокручиваемую страницу, регистрирует её под номером index и возвращает контейнер для содержимого. */
+    private LinearLayout newPage(int index) {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(20), dp(32), dp(20), dp(16));
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(content);
+        pages[index] = scroll;
+        return content;
+    }
+
+    /** Заголовок страницы: мелкая подпись (необязательно) над крупным названием. */
+    private LinearLayout titleBlock(String title, TextView subtitle) {
+        LinearLayout titles = new LinearLayout(this);
+        titles.setOrientation(LinearLayout.VERTICAL);
+        if (subtitle != null) titles.addView(subtitle);
+        TextView t = tv(34, TEXT, true);
+        t.setText(title);
+        titles.addView(t);
+        return titles;
+    }
+
     private void buildUi() {
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
 
+        buildTodayPage();
+        buildHistoryPage();
+        buildGoalPage();
+
+        FrameLayout frame = new FrameLayout(this);
+        for (View p : pages) frame.addView(p, new FrameLayout.LayoutParams(MATCH, MATCH));
+
+        // Плавающая нижняя панель
+        LinearLayout nav = new LinearLayout(this);
+        nav.setOrientation(LinearLayout.HORIZONTAL);
+        nav.setBackground(round(CARD, 32));
+        nav.setPadding(dp(6), dp(6), dp(6), dp(6));
+        for (int i = 0; i < 3; i++) {
+            final int index = i;
+            TextView item = tv(14, MUTED, true);
+            item.setText(TAB_NAMES[i]);
+            item.setGravity(Gravity.CENTER);
+            item.setPadding(0, dp(13), 0, dp(13));
+            item.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { select(index); }
+            });
+            navItems[i] = item;
+            nav.addView(item, new LinearLayout.LayoutParams(0, WRAP, 1f));
+        }
+        LinearLayout.LayoutParams navLp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        navLp.setMargins(dp(16), dp(8), dp(16), dp(12));
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(20), dp(32), dp(20), dp(28));
+        root.setBackgroundColor(BG);
+        root.addView(frame, new LinearLayout.LayoutParams(MATCH, 0, 1f));
+        root.addView(nav, navLp);
+        setContentView(root);
+    }
 
-        // Заголовок: дата и название слева, состояние справа
+    private void buildTodayPage() {
+        LinearLayout page = newPage(0);
+
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout titles = new LinearLayout(this);
-        titles.setOrientation(LinearLayout.VERTICAL);
         dateView = tv(14, MUTED, false);
-        titles.addView(dateView);
-        TextView title = tv(34, TEXT, true);
-        title.setText("Шаги");
-        titles.addView(title);
-        header.addView(titles, new LinearLayout.LayoutParams(0, WRAP, 1f));
+        header.addView(titleBlock("Шаги", dateView), new LinearLayout.LayoutParams(0, WRAP, 1f));
         stateChip = tv(13, DARK, true);
         stateChip.setPadding(dp(16), dp(8), dp(16), dp(8));
         header.addView(stateChip, new LinearLayout.LayoutParams(WRAP, WRAP));
-        root.addView(header);
+        page.addView(header);
 
-        // Главная карточка: сколько прошёл, полоса прогресса, сколько не хватает, деньги за день
         LinearLayout hero = card();
         TextView lbl = tv(14, MUTED, false);
         lbl.setText("Сегодня прошёл");
@@ -183,29 +251,18 @@ public class MainActivity extends Activity {
         moneyView = tv(22, TEXT, true);
         row.addView(moneyView, new LinearLayout.LayoutParams(WRAP, WRAP));
         hero.addView(row, lp(MATCH, WRAP, 14));
-        root.addView(hero);
+        page.addView(hero);
 
-        // Кнопки
         toggle = pill("", true, new View.OnClickListener() {
             @Override public void onClick(View v) { onToggle(); }
         });
-        root.addView(toggle, lp(MATCH, WRAP, 14));
+        page.addView(toggle, lp(MATCH, WRAP, 14));
+    }
 
-        LinearLayout second = new LinearLayout(this);
-        second.setOrientation(LinearLayout.HORIZONTAL);
-        Button goalBtn = pill("Цель и штраф", false, new View.OnClickListener() {
-            @Override public void onClick(View v) { showGoalDialog(); }
-        });
-        second.addView(goalBtn, new LinearLayout.LayoutParams(0, WRAP, 1f));
-        Button batBtn = pill("Работа в фоне", false, new View.OnClickListener() {
-            @Override public void onClick(View v) { openBatterySettings(); }
-        });
-        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(0, WRAP, 1f);
-        bp.leftMargin = dp(10);
-        second.addView(batBtn, bp);
-        root.addView(second, lp(MATCH, WRAP, 10));
+    private void buildHistoryPage() {
+        LinearLayout page = newPage(1);
+        page.addView(titleBlock("История", null));
 
-        // Итог: золотой "ценник" с общей суммой штрафов
         LinearLayout sum = card();
         TextView sumLbl = tv(14, MUTED, false);
         sumLbl.setText("Всего штрафов");
@@ -214,11 +271,8 @@ public class MainActivity extends Activity {
         sum.addView(totalValueView);
         totalInfoView = tv(13, MUTED, false);
         sum.addView(totalInfoView, lp(WRAP, WRAP, 4));
-        compareView = tv(12, MUTED, false);
-        sum.addView(compareView, lp(WRAP, WRAP, 12));
-        root.addView(sum);
+        page.addView(sum);
 
-        // История
         LinearLayout hist = card();
         TextView hTitle = tv(18, TEXT, true);
         hTitle.setText("Прошлые дни");
@@ -226,13 +280,55 @@ public class MainActivity extends Activity {
         historyBox = new LinearLayout(this);
         historyBox.setOrientation(LinearLayout.VERTICAL);
         hist.addView(historyBox, lp(MATCH, WRAP, 8));
-        root.addView(hist);
+        page.addView(hist);
+    }
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(BG);
-        scroll.setFillViewport(true);
-        scroll.addView(root);
-        setContentView(scroll);
+    private void buildGoalPage() {
+        LinearLayout page = newPage(2);
+        page.addView(titleBlock("Цель", null));
+
+        LinearLayout goal = card();
+        TextView gLbl = tv(14, MUTED, false);
+        gLbl.setText("Условия");
+        goal.addView(gLbl);
+        goalValueView = tv(28, TEXT, true);
+        goal.addView(goalValueView);
+        goalInfoView = tv(14, MUTED, false);
+        goal.addView(goalInfoView, lp(WRAP, WRAP, 6));
+        goal.addView(pill("Изменить цель и штраф", true, new View.OnClickListener() {
+            @Override public void onClick(View v) { showGoalDialog(); }
+        }), lp(MATCH, WRAP, 16));
+        page.addView(goal);
+
+        LinearLayout bg = card();
+        TextView bTitle = tv(18, TEXT, true);
+        bTitle.setText("Работа в фоне");
+        bg.addView(bTitle);
+        TextView bInfo = tv(13, MUTED, false);
+        bInfo.setText("Чтобы Android не останавливал счёт при выключенном экране, разрешите работу без ограничений батареи.");
+        bg.addView(bInfo, lp(WRAP, WRAP, 6));
+        bg.addView(pill("Настроить батарею", false, new View.OnClickListener() {
+            @Override public void onClick(View v) { openBatterySettings(); }
+        }), lp(MATCH, WRAP, 14));
+        page.addView(bg);
+
+        LinearLayout acc = card();
+        TextView aTitle = tv(18, TEXT, true);
+        aTitle.setText("Проверка точности");
+        acc.addView(aTitle);
+        compareView = tv(13, MUTED, false);
+        acc.addView(compareView, lp(WRAP, WRAP, 6));
+        page.addView(acc);
+    }
+
+    private void select(int i) {
+        selectedTab = i;
+        for (int k = 0; k < pages.length; k++) {
+            boolean on = k == i;
+            pages[k].setVisibility(on ? View.VISIBLE : View.GONE);
+            navItems[k].setTextColor(on ? DARK : MUTED);
+            navItems[k].setBackground(on ? round(GOLD, 24) : null);
+        }
     }
 
     // ---------- Жизненный цикл, разрешения, кнопки ----------
@@ -358,10 +454,17 @@ public class MainActivity extends Activity {
         Engine.Today t = Engine.today(this);
         LocalDate today = LocalDate.now();
 
+        renderToday(c, t, today);
+        renderTotals(c, t, today);
+        renderGoal(c, today);
+        renderHistory();
+    }
+
+    private void renderToday(Commitment c, Engine.Today t, LocalDate today) {
         dateView.setText(today.format(DateTimeFormatter.ofPattern("d MMMM", new Locale("ru"))));
         stepsView.setText(Fmt.num(t.steps));
 
-        // Состояние счёта: метка в шапке и главная кнопка меняются только при переключении
+        // Метка в шапке и главная кнопка меняются только при переключении
         boolean running = store.enabled();
         if (lastRunning == null || lastRunning != running) {
             lastRunning = running;
@@ -408,12 +511,13 @@ public class MainActivity extends Activity {
             moneyView.setText("0 ₽");
             moneyView.setTextColor(TEAL);
         }
+    }
 
-        // Общий итог
+    private void renderTotals(Commitment c, Engine.Today t, LocalDate today) {
         StringBuilder info = new StringBuilder();
         if (c == null) {
             totalValueView.setText("0 ₽");
-            info.append("Задайте цель, чтобы начать");
+            info.append("Задайте цель на вкладке «Цель»");
         } else {
             Settler.Summary s = Engine.summary(this);
             if (s != null) {
@@ -422,13 +526,28 @@ public class MainActivity extends Activity {
             } else {
                 totalValueView.setText("—");
             }
-            if (t.active && t.missing > 0) info.append("\nИтог дня подводится в полночь");
-            if (c.pendingFrom != null && today.isBefore(c.pendingFrom)) {
-                info.append("\nС ").append(c.pendingFrom).append(": ").append(Fmt.num(c.pendingGoal))
-                        .append(" шагов, штраф ").append(Fmt.penalty(c.pendingPenaltyMinor));
-            }
+            if (t.active && t.missing > 0) info.append("\nИтог сегодняшнего дня подводится в полночь");
         }
         totalInfoView.setText(info.toString());
+    }
+
+    private void renderGoal(Commitment c, LocalDate today) {
+        StringBuilder info = new StringBuilder();
+        if (c == null) {
+            goalValueView.setText("Не задана");
+            info.append("Укажите, сколько шагов в день и сколько платить за пропущенный день.");
+        } else {
+            goalValueView.setText(Fmt.num(c.goalFor(today)) + " шагов в день");
+            info.append("Штраф за пропущенный день: ").append(Fmt.penalty(c.penaltyFor(today)).replace("−", ""));
+            if (today.isBefore(c.start)) info.append("\nНачало: ").append(c.start);
+            if (c.pendingFrom != null && today.isBefore(c.pendingFrom)) {
+                info.append("\nС ").append(c.pendingFrom).append(": ").append(Fmt.num(c.pendingGoal))
+                        .append(" шагов, штраф ").append(Fmt.penalty(c.pendingPenaltyMinor).replace("−", ""));
+            }
+            info.append("\nУжесточить можно сразу, ослабить только через ")
+                    .append(Commitment.LOOSEN_DELAY_DAYS).append(" дней.");
+        }
+        goalInfoView.setText(info.toString());
 
         // Сравнение двух счётчиков (для проверки точности моего алгоритма)
         String day = Store.today();
@@ -436,12 +555,12 @@ public class MainActivity extends Activity {
         StringBuilder cmp = new StringBuilder("Мой алгоритм: ").append(Fmt.num(own));
         if (store.hwSeen()) {
             int hw = store.hw(day);
-            cmp.append("  ·  Шагомер телефона: ").append(Fmt.num(hw));
-            if (hw > 20) cmp.append(String.format(Locale.US, "  (%+.1f%%)", 100.0 * (own - hw) / hw));
+            cmp.append("\nШагомер телефона: ").append(Fmt.num(hw));
+            if (hw > 20) cmp.append(String.format(Locale.US, "\nРазница: %+.1f%%", 100.0 * (own - hw) / hw));
+        } else {
+            cmp.append("\nШагомер телефона пока не прислал данные");
         }
         compareView.setText(cmp.toString());
-
-        renderHistory();
     }
 
     private void renderHistory() {
