@@ -41,7 +41,10 @@ public class StepService extends Service implements SensorEventListener {
 
     private final Runnable periodic = new Runnable() {
         @Override public void run() {
+            rollDayIfNeeded();
             flush();
+            Engine.settle(StepService.this); // заодно повторяет неотправленные штрафы
+            Engine.remindIfNeeded(StepService.this);
             updateNotification();
             handler.postDelayed(this, 30_000);
         }
@@ -84,6 +87,7 @@ public class StepService extends Service implements SensorEventListener {
             }
         }
 
+        Engine.settle(this); // догоняем дни, пропущенные пока телефон был выключен
         handler.removeCallbacks(periodic);
         handler.postDelayed(periodic, 30_000);
         return START_STICKY;
@@ -118,6 +122,7 @@ public class StepService extends Service implements SensorEventListener {
             flush();
             day = d;
             ownToday = store.own(day);
+            Engine.settle(this); // новый день: подводим итоги вчерашнего
         }
     }
 
@@ -131,9 +136,15 @@ public class StepService extends Service implements SensorEventListener {
                 new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder b = Build.VERSION.SDK_INT >= 26
                 ? new Notification.Builder(this, CHANNEL) : new Notification.Builder(this);
+        flush(); // чтобы число в уведомлении было свежим
+        Engine.Today t = Engine.today(this);
+        String line;
+        if (!t.active) line = "Считаю в фоне";
+        else if (t.missing > 0) line = "Не хватает " + Fmt.num(t.missing) + " · " + Fmt.penalty(t.penaltyMinor);
+        else line = "Цель выполнена · 0 ₽";
         return b.setSmallIcon(android.R.drawable.ic_menu_compass)
-                .setContentTitle("Шагов сегодня: " + ownToday)
-                .setContentText("Считаю в фоне")
+                .setContentTitle("Прошёл: " + Fmt.num(t.steps) + " шагов")
+                .setContentText(line)
                 .setContentIntent(pi)
                 .setOnlyAlertOnce(true)
                 .setOngoing(true)

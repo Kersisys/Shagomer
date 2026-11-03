@@ -39,10 +39,26 @@ final class Store {
         if (last < 0) delta = 0;           // первое показание: просто запоминаем
         else if (cur >= last) delta = cur - last;
         else delta = cur;                  // перезагрузка
-        SharedPreferences.Editor e = p.edit().putLong(KEY_LAST_HW, cur);
+        SharedPreferences.Editor e = p.edit().putLong(KEY_LAST_HW, cur).putBoolean("hw_seen", true);
         if (delta > 0) e.putInt("hw_" + day, hw(day) + (int) delta);
         e.apply();
     }
+
+    /** true, если аппаратный шагомер хоть раз присылал данные (значит, он у телефона есть). */
+    boolean hwSeen() { return p.getBoolean("hw_seen", false); }
+
+    Commitment commitment() {
+        String s = p.getString("commitment", null);
+        return s == null ? null : Commitment.parse(s);
+    }
+    void setCommitment(Commitment c) { p.edit().putString("commitment", c.serialize()).apply(); }
+
+    /** Дата, когда вечернее напоминание уже было показано (чтобы не повторять). */
+    String lastReminded() { return p.getString("reminded", ""); }
+    void setLastReminded(String day) { p.edit().putString("reminded", day).apply(); }
+
+    boolean tampered() { return p.getBoolean("tampered", false); }
+    void setTampered(boolean v) { p.edit().putBoolean("tampered", v).apply(); }
 
     boolean enabled() { return p.getBoolean(KEY_ENABLED, false); }
     void setEnabled(boolean v) { p.edit().putBoolean(KEY_ENABLED, v).apply(); }
