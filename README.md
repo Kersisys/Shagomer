@@ -83,6 +83,16 @@ Realme UI агрессивно убивает фоновые приложени�
 Проверка ядра без телефона:
 ```
 P=app/src/main/java/com/stepcounter/app
-javac -encoding UTF-8 -d out $P/StepSource.java $P/Commitment.java $P/Ledger.java $P/PaymentProvider.java $P/VirtualVault.java $P/Settler.java $P/Fmt.java tools/com/stepcounter/app/CoreTest.java
+javac -encoding UTF-8 -d out $P/StepSource.java $P/Commitment.java $P/Ledger.java $P/PaymentProvider.java $P/VirtualVault.java $P/Settler.java $P/Fmt.java $P/Calories.java $P/Plan.java $P/FoodBook.java tools/com/stepcounter/app/CoreTest.java
 java -cp out com.stepcounter.app.CoreTest
 ```
+
+## Питание и норма калорий
+
+Вкладка «Питание»: добавляйте съеденное (название, ккал, белки, жиры, углеводы) и следите за бюджетом дня.
+Если калории не указаны, они считаются из БЖУ (4/9/4 ккал на грамм). Блюда можно сохранять и добавлять потом по несколько порций.
+
+Норма считается в `Plan.java`: расход в покое (Миффлин-Сан Жеор) × 1.3 − дефицит.
+Шаги добавляют калории только сверх 3500 в день (эти уже учтены в коэффициенте).
+До 18 лет дефицит ограничен 600 ккал, а минимум еды 2000 ккал в день.
+Все числа приблизительные, плюс-минус 10-20%.

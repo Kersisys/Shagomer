@@ -142,7 +142,10 @@ public class StepService extends Service implements SensorEventListener {
         if (!t.active) line = "Считаю в фоне";
         else if (t.missing > 0) line = "Не хватает " + Fmt.num(t.missing) + " · " + Fmt.penalty(t.penaltyMinor);
         else line = "Цель выполнена · 0 ₽";
-        return b.setSmallIcon(android.R.drawable.ic_menu_compass)
+        if (t.active && t.goal > 0) {
+            b.setProgress(t.goal, Math.min(t.steps, t.goal), false); // полоса прогресса в шторке
+        }
+        return b.setSmallIcon(R.drawable.ic_stat_steps)
                 .setContentTitle("Прошёл: " + Fmt.num(t.steps) + " шагов")
                 .setContentText(line)
                 .setContentIntent(pi)

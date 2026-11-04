@@ -75,7 +75,7 @@ final class Engine {
             PendingIntent pi = PendingIntent.getActivity(ctx, 0,
                     new Intent(ctx, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
             Notification n = new Notification.Builder(ctx, CH_RESULTS)
-                    .setSmallIcon(android.R.drawable.ic_menu_compass)
+                    .setSmallIcon(R.drawable.ic_stat_steps)
                     .setContentTitle(title)
                     .setContentText(text)
                     .setStyle(new Notification.BigTextStyle().bigText(text))

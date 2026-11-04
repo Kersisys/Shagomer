@@ -47,6 +47,21 @@ final class Store {
     /** true, если аппаратный шагомер хоть раз присылал данные (значит, он у телефона есть). */
     boolean hwSeen() { return p.getBoolean("hw_seen", false); }
 
+    /** Возраст, пол и желаемый дефицит калорий для суточной нормы. Возраст 0 = не указан. */
+    int age() { return p.getInt("age", 0); }
+    boolean male() { return p.getBoolean("male", true); }
+    int deficit() { return p.getInt("deficit", 500); }
+    void setBody(int age, boolean male, int deficit) {
+        p.edit().putInt("age", age).putBoolean("male", male).putInt("deficit", deficit).apply();
+    }
+
+    /** Вес и рост для расчёта калорий. 0 = не указано. */
+    int weightKg() { return p.getInt("weight_kg", 0); }
+    int heightCm() { return p.getInt("height_cm", 0); }
+    void setProfile(int weightKg, int heightCm) {
+        p.edit().putInt("weight_kg", weightKg).putInt("height_cm", heightCm).apply();
+    }
+
     Commitment commitment() {
         String s = p.getString("commitment", null);
         return s == null ? null : Commitment.parse(s);

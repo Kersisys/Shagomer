@@ -33,7 +33,7 @@ jobs:
         run: |
           mkdir -p out2
           P=app/src/main/java/com/stepcounter/app
-          javac -encoding UTF-8 -d out2 $P/StepSource.java $P/Commitment.java $P/Ledger.java $P/PaymentProvider.java $P/VirtualVault.java $P/Settler.java $P/Fmt.java tools/com/stepcounter/app/CoreTest.java
+          javac -encoding UTF-8 -d out2 $P/StepSource.java $P/Commitment.java $P/Ledger.java $P/PaymentProvider.java $P/VirtualVault.java $P/Settler.java $P/Fmt.java $P/Calories.java $P/Plan.java $P/FoodBook.java tools/com/stepcounter/app/CoreTest.java
           java -cp out2 com.stepcounter.app.CoreTest
 
       - name: Build debug APK

@@ -223,6 +223,78 @@ public class CoreTest {
             check("числа с пробелом тысяч", Fmt.num(12345).equals("12 345") && Fmt.num(7).equals("7"));
         }
 
+        System.out.println("Калории");
+        {
+            int k = Calories.netKcal(10000, 70, 175);
+            check("10000 шагов, 70 кг, 175 см = около 254 ккал (чистый расход)", k >= 250 && k <= 258);
+            check("длина шага по росту 175 см = 72.6 см", Math.abs(Calories.stepLengthM(175) - 0.72625) < 1e-9);
+            check("расстояние 10000 шагов около 7.3 км", Math.abs(Calories.distanceKm(10000, 175) - 7.2625) < 1e-9);
+            check("вес не указан: 0 ккал", Calories.netKcal(10000, 0, 175) == 0);
+            check("рост не указан: 0 ккал", Calories.netKcal(10000, 70, 0) == 0);
+            check("больше вес: больше калорий", Calories.netKcal(10000, 90, 175) > Calories.netKcal(10000, 70, 175));
+        }
+
+        System.out.println("Суточная норма (Plan)");
+        {
+            Plan p0 = Plan.compute(93, 179, 17, true, 500, 0);
+            check("расход в покое для 93 кг, 179 см, 17 лет, парень = 1969", p0.ready && p0.bmr == 1969);
+            check("суточный расход (x1.3) около 2559", Math.abs(p0.tdee - 2559) <= 1);
+            check("норма при дефиците 500 около 2059", Math.abs(p0.norm - 2059) <= 1);
+            check("без шагов бюджет равен норме", p0.bonus == 0 && p0.budget == p0.norm);
+            Plan p3 = Plan.compute(93, 179, 17, true, 500, 3500);
+            check("базовые 3500 шагов в бюджет не добавляются", p3.bonus == 0);
+            Plan p10 = Plan.compute(93, 179, 17, true, 500, 10000);
+            check("10000 шагов добавляют около 224 ккал (6500 шагов сверх базы)", p10.bonus >= 220 && p10.bonus <= 228);
+            check("бюджет = норма + добавка", p10.budget == p10.norm + p10.bonus);
+            check("белок 1.3 г/кг = 121 г", p0.proteinG == 121);
+            check("БЖУ сходятся с бюджетом (±15 ккал)",
+                    Math.abs(p10.proteinG * 4 + p10.fatG * 9 + p10.carbsG * 4 - p10.budget) <= 15);
+            Plan small = Plan.compute(50, 160, 17, true, 600, 0);
+            check("до 18 лет норма не ниже 2000 ккал", small.norm == 2000);
+            Plan big = Plan.compute(93, 179, 17, true, 5000, 0);
+            check("до 18 лет дефицит ограничен 600: норма не ниже tdee-600", big.norm >= big.tdee - 600 - 1);
+            Plan adultF = Plan.compute(50, 160, 30, false, 1000, 0);
+            check("взрослая женщина: минимум 1200", adultF.norm >= 1200);
+            check("профиль не заполнен: план не готов", !Plan.compute(0, 179, 17, true, 500, 0).ready
+                    && !Plan.compute(93, 179, 0, true, 500, 0).ready);
+            check("пол влияет: у девушки норма ниже",
+                    Plan.compute(70, 170, 25, false, 0, 0).bmr < Plan.compute(70, 170, 25, true, 0, 0).bmr);
+        }
+
+        System.out.println("Журнал еды (FoodBook)");
+        {
+            File dir = java.nio.file.Files.createTempDirectory("food").toFile();
+            dir.deleteOnExit();
+            FoodBook fb = new FoodBook(dir);
+            fb.add("2026-11-04", "Овсянка", 350, 12, 6, 60);
+            fb.add("2026-11-04", "Курица | гречка", 520, 45, 10, 60); // знак | в названии не должен ломать файл
+            fb.add("2026-11-05", "Йогурт", 120, 8, 3, 14);
+            List<FoodBook.Entry> day4 = fb.entries("2026-11-04");
+            check("записи группируются по дням", day4.size() == 2 && fb.entries("2026-11-05").size() == 1);
+            int[] t = FoodBook.totals(day4);
+            check("суммы КБЖУ за день: 870 ккал, Б57 Ж16 У120", t[0] == 870 && t[1] == 57 && t[2] == 16 && t[3] == 120);
+            check("знак | в названии заменён, запись цела", day4.get(1).name.equals("Курица гречка") && day4.get(1).kcal == 520);
+            fb.remove(day4.get(0).idx);
+            check("удаление записи работает и не трогает чужие дни",
+                    fb.entries("2026-11-04").size() == 1 && fb.entries("2026-11-05").size() == 1
+                            && fb.entries("2026-11-04").get(0).name.startsWith("Курица"));
+            check("пустой день даёт нулевые суммы", FoodBook.totals(fb.entries("2030-01-01"))[0] == 0);
+
+            fb.saveDish("Борщ", 250, 10, 12, 25);
+            fb.saveDish("борщ", 260, 11, 12, 26); // то же название: заменяет
+            fb.saveDish("Рис", 200, 4, 1, 44);
+            List<FoodBook.Entry> dishes = fb.dishes();
+            check("блюдо с тем же названием заменяется, а не дублируется", dishes.size() == 2);
+            FoodBook.Entry borsch = null;
+            for (FoodBook.Entry d : dishes) if (d.name.equalsIgnoreCase("борщ")) borsch = d;
+            check("в списке актуальная версия блюда", borsch != null && borsch.kcal == 260);
+            FoodBook.Entry s = borsch.scaled(1.5);
+            check("1.5 порции умножают КБЖУ и подписываются", s.kcal == 390 && s.name.endsWith("×1.5"));
+            check("2 порции подписываются без дроби", borsch.scaled(2).name.endsWith("×2"));
+            fb.removeDish(borsch.idx);
+            check("удаление блюда из списка", fb.dishes().size() == 1 && fb.dishes().get(0).name.equals("Рис"));
+        }
+
         System.out.println();
         System.out.println("Пройдено: " + passed + ", провалено: " + failed);
         if (failed > 0) System.exit(1);
