@@ -10,13 +10,32 @@ android {
         applicationId "com.stepcounter.app"
         minSdk 26
         targetSdk 34
-        versionCode 1
+        // Растёт сам с каждой сборкой (минуты с 1970 года), где бы она ни шла: в GitHub или локально.
+        // Так Android никогда не посчитает новую сборку "понижением версии" старой.
+        versionCode System.currentTimeMillis().intdiv(60000L).intValue()
         versionName "1.0"
     }
 
+    // Один постоянный ключ для всех сборок. Без него GitHub Actions подписывает каждую сборку
+    // новым случайным ключом, и Android отказывается ставить её поверх предыдущей.
+    // Файл ключа лежит в репозитории (app/keystore/shared.jks), его нельзя пересоздавать:
+    // с новым ключом обновление поверх старого снова будет невозможно.
+    signingConfigs {
+        shared {
+            storeFile file('keystore/shared.jks')
+            storePassword 'steps-shared'
+            keyAlias 'steps'
+            keyPassword 'steps-shared'
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig signingConfigs.shared
+        }
         release {
             minifyEnabled false
+            signingConfig signingConfigs.shared
         }
     }
 
