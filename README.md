@@ -83,7 +83,7 @@ Realme UI агрессивно убивает фоновые приложени�
 Проверка ядра без телефона:
 ```
 P=app/src/main/java/com/stepcounter/app
-javac -encoding UTF-8 -d out $P/StepSource.java $P/Commitment.java $P/Ledger.java $P/PaymentProvider.java $P/VirtualVault.java $P/Settler.java $P/Fmt.java $P/Calories.java $P/Plan.java $P/FoodBook.java tools/com/stepcounter/app/CoreTest.java
+javac -encoding UTF-8 -d out $P/StepSource.java $P/Commitment.java $P/Ledger.java $P/PaymentProvider.java $P/VirtualVault.java $P/Settler.java $P/Fmt.java $P/Calories.java $P/Plan.java $P/FoodBook.java $P/Calibration.java tools/com/stepcounter/app/CoreTest.java
 java -cp out com.stepcounter.app.CoreTest
 ```
 
@@ -111,3 +111,11 @@ java -cp out com.stepcounter.app.CoreTest
 Ключ не пересоздавайте и не меняйте пароль: с другим ключом обновление снова станет невозможным.
 Держите репозиторий приватным, раз ключ лежит в нём.
 В логе сборки есть шаг «Show signing certificate»: отпечаток SHA-256 должен быть одинаковым у всех сборок.
+
+## Калибровка шагов
+
+Вкладка «Калибровка» (золотая в нижней панели, пока шаги не откалиброваны, на главной висит золотой баннер).
+Проходите заранее известное число шагов (лучше 100, не меньше 50), нажимаете «Старт» и «Стоп», вводите настоящее число.
+Приложение считает поправку к своему алгоритму и к шагомеру телефона и применяет её ко всем дальнейшим счётам.
+Если указать пройденное расстояние, считается и длина шага для километров и калорий.
+Слишком большая разница (поправка вне 0.75–1.35), меньше 50 шагов и нулевой счёт отклоняются.

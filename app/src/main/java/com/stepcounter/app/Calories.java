@@ -26,6 +26,17 @@ final class Calories {
         return steps * stepLengthM(heightCm) / 1000.0;
     }
 
+    /** Расстояние при заданной (например, откалиброванной) длине шага. */
+    static double distanceKmByStep(int steps, double stepLengthM) {
+        return steps * stepLengthM / 1000.0;
+    }
+
+    /** Чистый расход при заданной длине шага. 0, если данных не хватает. */
+    static int netKcalByStep(int steps, int weightKg, double stepLengthM) {
+        if (weightKg <= 0 || stepLengthM <= 0 || steps <= 0) return 0;
+        return (int) Math.round(NET_KCAL_PER_KG_KM * weightKg * distanceKmByStep(steps, stepLengthM));
+    }
+
     /** Чистый расход в ккал. 0, если вес или рост не указаны. */
     static int netKcal(int steps, int weightKg, int heightCm) {
         if (weightKg <= 0 || heightCm <= 0 || steps <= 0) return 0;

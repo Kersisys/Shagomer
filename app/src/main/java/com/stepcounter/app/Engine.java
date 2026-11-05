@@ -37,8 +37,8 @@ final class Engine {
         LocalDate d = LocalDate.now();
         String key = d.toString();
         Commitment c = s.commitment();
-        int own = s.own(key);
-        Integer hw = s.hwSeen() ? s.hw(key) : null;
+        int own = Calibration.scale(s.own(key), s.ownPermille());
+        Integer hw = s.hwSeen() ? Calibration.scale(s.hw(key), s.hwPermille()) : null;
         Today t = new Today();
         t.steps = c == null ? own : c.source.pick(own, hw);
         if (c != null && !d.isBefore(c.start)) {
@@ -125,8 +125,13 @@ final class Engine {
 
     private static Settler.StepsLookup lookup(final Store store) {
         return new Settler.StepsLookup() {
-            @Override public int own(LocalDate d) { return store.own(d.toString()); }
-            @Override public Integer hw(LocalDate d) { return store.hwSeen() ? store.hw(d.toString()) : null; }
+            // Счёты умножаются на поправки из калибровки (без калибровки поправка равна 1)
+            @Override public int own(LocalDate d) {
+                return Calibration.scale(store.own(d.toString()), store.ownPermille());
+            }
+            @Override public Integer hw(LocalDate d) {
+                return store.hwSeen() ? Calibration.scale(store.hw(d.toString()), store.hwPermille()) : null;
+            }
         };
     }
 

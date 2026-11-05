@@ -58,8 +58,11 @@ public class MainActivity extends Activity {
     private static final int WRAP = LinearLayout.LayoutParams.WRAP_CONTENT;
     private static final int NUM = InputType.TYPE_CLASS_NUMBER;
 
-    private static final String[] TAB_NAMES = {"Сегодня", "Питание", "История", "Цель"};
+    private static final String[] TAB_NAMES = {"Сегодня", "Еда", "История", "Цель", "Калибровка"};
+    /** Ширина пунктов нижней панели: длинным названиям нужно больше места. */
+    private static final float[] TAB_WEIGHTS = {1.1f, 0.8f, 1.0f, 0.8f, 1.5f};
     private static final int TABS = TAB_NAMES.length;
+    private static final int CAL_TAB = 4;
 
     private Store store;
     private FoodBook food;
@@ -85,6 +88,15 @@ public class MainActivity extends Activity {
     private LinearLayout historyBox;
     // Вкладка "Цель"
     private TextView goalValueView, goalInfoView, compareView, profileView;
+    // Вкладка "Калибровка" и баннер на главной
+    private LinearLayout calBanner, calInputBox, calResultCard;
+    private TextView calLiveOwn, calLiveHw, calHint, calResultView, calAppliedView;
+    private Button calPrimary;
+    private EditText calRealField, calDistField;
+    private int lastCalState = -1;
+    private Calibration.Result pendOwn, pendHw; // рассчитано, но ещё не применено
+    private double pendStepCm;
+    private boolean pendDistBad;
 
     private Boolean lastRunning;   // чтобы не перерисовывать кнопку и метку каждую секунду
     private String lastHistorySig; // то же для списка истории
@@ -238,6 +250,7 @@ public class MainActivity extends Activity {
         buildFoodPage();
         buildHistoryPage();
         buildGoalPage();
+        buildCalibrationPage();
 
         FrameLayout frame = new FrameLayout(this);
         for (View p : pages) frame.addView(p, new FrameLayout.LayoutParams(MATCH, MATCH));
@@ -249,7 +262,7 @@ public class MainActivity extends Activity {
         nav.setPadding(dp(6), dp(6), dp(6), dp(6));
         for (int i = 0; i < TABS; i++) {
             final int index = i;
-            TextView item = tv(13, MUTED, true);
+            TextView item = tv(12, MUTED, true);
             item.setText(TAB_NAMES[i]);
             item.setGravity(Gravity.CENTER);
             item.setSingleLine(true);
@@ -258,7 +271,7 @@ public class MainActivity extends Activity {
                 @Override public void onClick(View v) { select(index); }
             });
             navItems[i] = item;
-            nav.addView(item, new LinearLayout.LayoutParams(0, WRAP, 1f));
+            nav.addView(item, new LinearLayout.LayoutParams(0, WRAP, TAB_WEIGHTS[i]));
         }
         LinearLayout.LayoutParams navLp = new LinearLayout.LayoutParams(MATCH, WRAP);
         navLp.setMargins(dp(16), dp(8), dp(16), dp(12));
@@ -283,6 +296,20 @@ public class MainActivity extends Activity {
         stateChip.setPadding(dp(16), dp(8), dp(16), dp(8));
         header.addView(stateChip, new LinearLayout.LayoutParams(WRAP, WRAP));
         page.addView(header);
+
+        // Золотой баннер, пока шаги не откалиброваны
+        calBanner = card();
+        calBanner.setBackground(round(GOLD, 28));
+        TextView b1 = tv(18, DARK, true);
+        b1.setText("Откалибруйте шаги");
+        calBanner.addView(b1);
+        TextView b2 = tv(13, DARK, false);
+        b2.setText("Две минуты: пройдите 100 шагов, и счёт станет точнее.");
+        calBanner.addView(b2, lp(WRAP, WRAP, 4));
+        calBanner.addView(pill("Откалибровать", false, new View.OnClickListener() {
+            @Override public void onClick(View v) { select(CAL_TAB); }
+        }), lp(MATCH, WRAP, 12));
+        page.addView(calBanner);
 
         LinearLayout hero = card();
         TextView lbl = tv(14, MUTED, false);
@@ -444,12 +471,270 @@ public class MainActivity extends Activity {
         page.addView(acc);
     }
 
+    // ---------- Вкладка «Калибровка» ----------
+
+    private void buildCalibrationPage() {
+        LinearLayout page = newPage(CAL_TAB);
+        page.addView(titleBlock("Калибровка", null));
+
+        // Заметный золотой блок
+        LinearLayout hero = card();
+        hero.setBackground(round(GOLD, 28));
+        TextView h1 = tv(22, DARK, true);
+        h1.setText("Откалибруйте шаги");
+        hero.addView(h1);
+        TextView h2 = tv(14, DARK, false);
+        h2.setText("Пройдите 100 шагов и посчитайте их сами. Приложение сравнит это число со своим счётом "
+                + "и со счётом шагомера телефона и подгонит поправку. Если знаете расстояние, узнает и длину вашего шага.");
+        hero.addView(h2, lp(WRAP, WRAP, 6));
+        page.addView(hero);
+
+        LinearLayout how = card();
+        TextView howTitle = tv(18, TEXT, true);
+        howTitle.setText("Как это сделать");
+        how.addView(howTitle);
+        TextView howSteps = tv(13, MUTED, false);
+        howSteps.setText("1. Запустите счёт на вкладке «Сегодня».\n"
+                + "2. Нажмите «Старт» и уберите телефон туда, где носите его обычно.\n"
+                + "3. Пройдите ровно 100 шагов обычным темпом, считая вслух. Можно больше, но не меньше 50.\n"
+                + "4. Остановитесь, нажмите «Стоп» и постойте на месте 10 секунд: шагомер телефона присылает данные с задержкой.\n"
+                + "5. Введите, сколько шагов прошли на самом деле. Расстояние в метрах указывайте, если мерили его (например, по карте).");
+        how.addView(howSteps, lp(WRAP, WRAP, 6));
+        page.addView(how);
+
+        // Живые счётчики, кнопка и ввод
+        LinearLayout live = card();
+        LinearLayout cols = new LinearLayout(this);
+        cols.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout left = new LinearLayout(this);
+        left.setOrientation(LinearLayout.VERTICAL);
+        TextView lOwn = tv(12, MUTED, false);
+        lOwn.setText("Мой алгоритм");
+        left.addView(lOwn);
+        calLiveOwn = tv(36, TEXT, true);
+        left.addView(calLiveOwn);
+        cols.addView(left, new LinearLayout.LayoutParams(0, WRAP, 1f));
+        LinearLayout right = new LinearLayout(this);
+        right.setOrientation(LinearLayout.VERTICAL);
+        TextView lHw = tv(12, MUTED, false);
+        lHw.setText("Шагомер телефона");
+        right.addView(lHw);
+        calLiveHw = tv(36, TEXT, true);
+        right.addView(calLiveHw);
+        cols.addView(right, new LinearLayout.LayoutParams(0, WRAP, 1f));
+        live.addView(cols);
+
+        calHint = tv(13, MUTED, false);
+        live.addView(calHint, lp(WRAP, WRAP, 10));
+        calPrimary = pill("Старт", true, new View.OnClickListener() {
+            @Override public void onClick(View v) { onCalibPrimary(); }
+        });
+        live.addView(calPrimary, lp(MATCH, WRAP, 14));
+
+        calInputBox = new LinearLayout(this);
+        calInputBox.setOrientation(LinearLayout.VERTICAL);
+        calRealField = field("Сколько шагов вы прошли на самом деле", NUM);
+        calDistField = field("Расстояние в метрах (необязательно)",
+                InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        calInputBox.addView(calRealField);
+        calInputBox.addView(calDistField);
+        calInputBox.addView(pill("Рассчитать", true, new View.OnClickListener() {
+            @Override public void onClick(View v) { onCalibCalculate(); }
+        }), lp(MATCH, WRAP, 10));
+        live.addView(calInputBox, lp(MATCH, WRAP, 10));
+        page.addView(live);
+
+        // Результат расчёта
+        calResultCard = card();
+        TextView resTitle = tv(18, TEXT, true);
+        resTitle.setText("Результат");
+        calResultCard.addView(resTitle);
+        calResultView = tv(14, TEXT, false);
+        calResultCard.addView(calResultView, lp(WRAP, WRAP, 6));
+        calResultCard.addView(pill("Применить", true, new View.OnClickListener() {
+            @Override public void onClick(View v) { onCalibApply(); }
+        }), lp(MATCH, WRAP, 14));
+        calResultCard.addView(pill("Отмена", false, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                pendOwn = null;
+                pendHw = null;
+                renderCalibration();
+            }
+        }), lp(MATCH, WRAP, 10));
+        calResultCard.setVisibility(View.GONE);
+        page.addView(calResultCard);
+
+        // Что сейчас применено
+        LinearLayout applied = card();
+        TextView apTitle = tv(18, TEXT, true);
+        apTitle.setText("Текущая калибровка");
+        applied.addView(apTitle);
+        calAppliedView = tv(13, MUTED, false);
+        applied.addView(calAppliedView, lp(WRAP, WRAP, 6));
+        applied.addView(pill("Сбросить калибровку", false, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                store.resetCalibration();
+                render();
+            }
+        }), lp(MATCH, WRAP, 14));
+        page.addView(applied);
+    }
+
+    private void onCalibPrimary() {
+        int st = store.calibState();
+        String today = Store.today();
+        if (st == 0) {
+            if (!store.enabled()) {
+                toast("Сначала запустите счёт на вкладке «Сегодня»");
+                return;
+            }
+            pendOwn = null;
+            pendHw = null;
+            pendStepCm = 0;
+            calRealField.setText("");
+            calDistField.setText("");
+            store.calibStart(today, StepService.ownNow(store), store.hw(today));
+        } else if (st == 1) {
+            int own = StepService.ownNow(store) - store.calibOwn0();
+            store.calibStop(Math.max(0, own), System.currentTimeMillis());
+        } else {
+            store.calibClear();
+            pendOwn = null;
+            pendHw = null;
+            pendStepCm = 0;
+        }
+        renderCalibration();
+    }
+
+    private void onCalibCalculate() {
+        if (store.calibState() != 2) return;
+        long waitMs = 10_000 - (System.currentTimeMillis() - store.calibStopMs());
+        if (waitMs > 0) {
+            toast("Подождите ещё " + (waitMs / 1000 + 1) + " с: шагомер телефона присылает данные с задержкой");
+            return;
+        }
+        int real;
+        try {
+            real = intOf(calRealField);
+        } catch (NumberFormatException e) {
+            toast("Введите число шагов");
+            return;
+        }
+        double distM = 0;
+        String ds = calDistField.getText().toString().trim().replace(',', '.');
+        if (!ds.isEmpty()) {
+            try {
+                distM = Double.parseDouble(ds);
+            } catch (NumberFormatException e) {
+                toast("Расстояние: введите число");
+                return;
+            }
+        }
+        pendOwn = Calibration.compare(real, store.calibOwnDelta());
+        pendHw = store.hwSeen()
+                ? Calibration.compare(real, Math.max(0, store.hw(store.calibDay()) - store.calibHw0()))
+                : null;
+        pendStepCm = distM > 0 ? Calibration.stepLengthCm(real, distM) : 0;
+        pendDistBad = distM > 0 && pendStepCm == 0;
+        renderCalibration();
+    }
+
+    private void onCalibApply() {
+        if (pendOwn == null) return;
+        boolean ownOk = pendOwn.ok;
+        boolean hwOk = pendHw != null && pendHw.ok;
+        if (!ownOk && !hwOk && pendStepCm <= 0) {
+            toast("Нечего применять: проверьте результат и пройдите заново");
+            return;
+        }
+        int ownP = ownOk ? (int) Math.round(pendOwn.factor * 1000) : store.ownPermille();
+        int hwP = hwOk ? (int) Math.round(pendHw.factor * 1000) : store.hwPermille();
+        int stepMm = pendStepCm > 0 ? (int) Math.round(pendStepCm * 10) : store.stepLenMm();
+        store.applyCalibration(ownP, hwP, stepMm);
+        store.calibClear();
+        pendOwn = null;
+        pendHw = null;
+        pendStepCm = 0;
+        toast("Калибровка применена");
+        render();
+    }
+
+    private String describe(String who, Calibration.Result r) {
+        if (!r.ok) return who + ": " + r.problem;
+        return String.format(Locale.US, "%s: насчитал %d из %d, ошибка %+.1f%%, поправка ×%.3f",
+                who, r.counted, r.real, r.errorPct, r.factor);
+    }
+
+    private void renderCalibration() {
+        calBanner.setVisibility(store.calibrated() ? View.GONE : View.VISIBLE);
+
+        String today = Store.today();
+        int st = store.calibState();
+        if (st != 0 && !today.equals(store.calibDay())) { // проба не должна переходить через полночь
+            store.calibClear();
+            st = 0;
+            pendOwn = null;
+            pendHw = null;
+            pendStepCm = 0;
+        }
+
+        int own = 0;
+        if (st == 1) own = StepService.ownNow(store) - store.calibOwn0();
+        else if (st == 2) own = store.calibOwnDelta();
+        int hw = st != 0 && store.hwSeen() ? store.hw(today) - store.calibHw0() : 0;
+        calLiveOwn.setText(Fmt.num(Math.max(0, own)));
+        calLiveHw.setText(store.hwSeen() ? Fmt.num(Math.max(0, hw)) : "нет");
+
+        String[] labels = {"Старт", "Стоп", "Начать заново"};
+        calPrimary.setText(labels[st]);
+        if (lastCalState != st) {
+            lastCalState = st;
+            stylePill(calPrimary, st != 1);
+        }
+
+        if (st == 0) {
+            calHint.setText(store.enabled() ? "Нажмите «Старт», потом идите."
+                    : "Сначала запустите счёт на вкладке «Сегодня».");
+        } else if (st == 1) {
+            calHint.setText("Идите и считайте шаги. Когда пройдёте нужное число, нажмите «Стоп».");
+        } else {
+            calHint.setText("Остановлено. Подождите 10 секунд на месте и введите настоящее число шагов.");
+        }
+        calInputBox.setVisibility(st == 2 ? View.VISIBLE : View.GONE);
+
+        boolean showResult = st == 2 && pendOwn != null;
+        calResultCard.setVisibility(showResult ? View.VISIBLE : View.GONE);
+        if (showResult) {
+            StringBuilder sb = new StringBuilder(describe("Мой алгоритм", pendOwn));
+            sb.append('\n').append(pendHw != null ? describe("Шагомер телефона", pendHw)
+                    : "Шагомер телефона: нет данных");
+            if (pendStepCm > 0) {
+                sb.append(String.format(Locale.US, "\nДлина шага: %.1f см", pendStepCm));
+            } else if (pendDistBad) {
+                sb.append("\nДлина шага: расстояние выглядит неправдоподобно, не применяется");
+            }
+            calResultView.setText(sb.toString());
+        }
+
+        if (store.calibrated()) {
+            calAppliedView.setText(String.format(Locale.US,
+                    "Мой алгоритм: ×%.3f\nШагомер телефона: ×%.3f\nДлина шага: %s",
+                    store.ownPermille() / 1000.0, store.hwPermille() / 1000.0,
+                    store.stepLenMm() > 0
+                            ? String.format(Locale.US, "%.1f см (замерена)", store.stepLenMm() / 10.0)
+                            : "по росту"));
+        } else {
+            calAppliedView.setText("Не выполнялась. Счёт идёт без поправок.");
+        }
+    }
+
     private void select(int i) {
         selectedTab = i;
         for (int k = 0; k < pages.length; k++) {
             boolean on = k == i;
             pages[k].setVisibility(on ? View.VISIBLE : View.GONE);
-            navItems[k].setTextColor(on ? DARK : MUTED);
+            // Калибровка в неактивном состоянии подсвечена золотым, чтобы вкладка бросалась в глаза
+            navItems[k].setTextColor(on ? DARK : (k == CAL_TAB ? GOLD : MUTED));
             navItems[k].setBackground(on ? round(GOLD, 24) : null);
         }
     }
@@ -815,6 +1100,7 @@ public class MainActivity extends Activity {
         renderTotals(c, t, today);
         renderGoal(c, today);
         renderHistory();
+        renderCalibration();
     }
 
     private void renderToday(Commitment c, Engine.Today t, LocalDate today) {
@@ -874,8 +1160,8 @@ public class MainActivity extends Activity {
 
         // Калории: чистый расход на ходьбу по шагам, весу и росту
         if (store.weightKg() > 0 && store.heightCm() > 0) {
-            int kcal = Calories.netKcal(t.steps, store.weightKg(), store.heightCm());
-            double km = Calories.distanceKm(t.steps, store.heightCm());
+            int kcal = Calories.netKcalByStep(t.steps, store.weightKg(), store.stepLengthM());
+            double km = Calories.distanceKmByStep(t.steps, store.stepLengthM());
             kcalView.setText(String.format(Locale.US, "Сожжено ~%d ккал  ·  %.1f км", kcal, km));
             kcalView.setTextColor(GOLD);
         } else {
@@ -887,7 +1173,7 @@ public class MainActivity extends Activity {
     /** Вкладка «Питание» и строка еды на главной. */
     private void renderFood(Engine.Today t) {
         Plan plan = Plan.compute(store.weightKg(), store.heightCm(), store.age(), store.male(),
-                store.deficit(), t.steps);
+                store.deficit(), t.steps, store.stepLengthM());
         List<FoodBook.Entry> entries;
         try {
             entries = food.entries(Store.today());
@@ -1011,12 +1297,12 @@ public class MainActivity extends Activity {
         // Профиль
         if (store.weightKg() > 0 && store.heightCm() > 0 && store.age() > 0) {
             Plan plan = Plan.compute(store.weightKg(), store.heightCm(), store.age(), store.male(),
-                    store.deficit(), 0);
+                    store.deficit(), 0, store.stepLengthM());
             profileView.setText(String.format(Locale.US,
                     "Вес %d кг, рост %d см, %d лет, %s.\nДлина шага %.0f см (по росту).\n"
                             + "Расход в покое %s ккал, обычный день %s ккал.\nНорма еды %s ккал (дефицит %d).",
                     store.weightKg(), store.heightCm(), store.age(), store.male() ? "парень" : "девушка",
-                    Calories.stepLengthM(store.heightCm()) * 100,
+                    store.stepLengthM() * 100,
                     Fmt.num(plan.bmr), Fmt.num(plan.tdee), Fmt.num(plan.norm), plan.tdee - plan.norm));
         } else {
             profileView.setText("Не указаны. Нужны для подсчёта калорий, нормы еды и пройденных километров.");

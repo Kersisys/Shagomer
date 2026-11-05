@@ -295,6 +295,39 @@ public class CoreTest {
             check("удаление блюда из списка", fb.dishes().size() == 1 && fb.dishes().get(0).name.equals("Рис"));
         }
 
+        System.out.println("Калибровка");
+        {
+            Calibration.Result exact = Calibration.compare(100, 100);
+            check("точный счёт: поправка 1.0, ошибка 0%", exact.ok && exact.factor == 1.0 && exact.errorPct == 0);
+            Calibration.Result under = Calibration.compare(100, 95);
+            check("недосчитал 5 шагов: ошибка -5%, поправка 1.053", under.ok && Math.abs(under.errorPct + 5.0) < 1e-9
+                    && Math.abs(under.factor - 1.0526) < 1e-3);
+            Calibration.Result over = Calibration.compare(100, 110);
+            check("насчитал лишнее: поправка меньше 1", over.ok && over.factor < 1.0 && over.errorPct > 0);
+            check("слишком большая разница отклоняется", !Calibration.compare(100, 150).ok && !Calibration.compare(100, 60).ok);
+            check("меньше 50 шагов отклоняется", !Calibration.compare(20, 20).ok);
+            check("нулевой счёт датчика отклоняется", !Calibration.compare(100, 0).ok);
+            check("длина шага по расстоянию: 100 шагов, 74 м = 74 см", Math.abs(Calibration.stepLengthCm(100, 74) - 74) < 1e-9);
+            check("неправдоподобная длина шага (10 см, 200 см) отклоняется",
+                    Calibration.stepLengthCm(100, 10) == 0 && Calibration.stepLengthCm(100, 200) == 0);
+            check("без расстояния или с малым числом шагов длина шага не считается",
+                    Calibration.stepLengthCm(100, 0) == 0 && Calibration.stepLengthCm(30, 22) == 0);
+            check("применение поправки: 1000 при 1.05 = 1050, без поправки без изменений",
+                    Calibration.scale(1000, 1050) == 1050 && Calibration.scale(100, 1000) == 100);
+            check("поправка округляется: 3 шага x1.5 = 5", Calibration.scale(3, 1500) == 5);
+            int viaHeight = Calories.netKcal(10000, 93, 179);
+            int viaStep = Calories.netKcalByStep(10000, 93, Calories.stepLengthM(179));
+            check("калории по росту и по готовой длине шага совпадают", viaHeight == viaStep);
+            check("длиннее шаг: больше километров и калорий",
+                    Calories.netKcalByStep(10000, 93, 0.80) > Calories.netKcalByStep(10000, 93, 0.70));
+            Plan def = Plan.compute(93, 179, 17, true, 500, 10000);
+            Plan same = Plan.compute(93, 179, 17, true, 500, 10000, Calories.stepLengthM(179));
+            Plan longer = Plan.compute(93, 179, 17, true, 500, 10000, 0.85);
+            check("план с той же длиной шага не меняется", def.budget == same.budget);
+            check("откалиброванный длинный шаг увеличивает добавку за шаги, норму не меняет",
+                    longer.bonus > same.bonus && longer.norm == same.norm);
+        }
+
         System.out.println();
         System.out.println("Пройдено: " + passed + ", провалено: " + failed);
         if (failed > 0) System.exit(1);

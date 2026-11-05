@@ -55,6 +55,12 @@ final class Plan {
     }
 
     static Plan compute(int weightKg, int heightCm, int age, boolean male, int deficit, int stepsToday) {
+        return compute(weightKg, heightCm, age, male, deficit, stepsToday, Calories.stepLengthM(heightCm));
+    }
+
+    /** То же, но с заданной (например, откалиброванной) длиной шага в метрах. */
+    static Plan compute(int weightKg, int heightCm, int age, boolean male, int deficit, int stepsToday,
+                        double stepLengthM) {
         if (weightKg <= 0 || heightCm <= 0 || age <= 0) {
             return new Plan(false, 0, 0, 0, 0, 0, 0, 0, 0);
         }
@@ -62,7 +68,7 @@ final class Plan {
         double tdee = bmr * ACTIVITY;
         int safeDeficit = Math.max(0, Math.min(deficit, maxDeficit(age, male)));
         int norm = Math.max(minIntake(age, male), (int) Math.round(tdee - safeDeficit));
-        int bonus = Calories.netKcal(Math.max(0, stepsToday - BASE_STEPS), weightKg, heightCm);
+        int bonus = Calories.netKcalByStep(Math.max(0, stepsToday - BASE_STEPS), weightKg, stepLengthM);
         int budget = norm + bonus;
         int protein = (int) Math.round(PROTEIN_G_PER_KG * weightKg);
         int fat = (int) Math.round(FAT_SHARE * budget / 9.0);

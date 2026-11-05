@@ -39,6 +39,19 @@ public class StepService extends Service implements SensorEventListener {
     private long lastNotifyMs;
     private boolean registered;
 
+    /**
+     * Точный счёт своего алгоритма в памяти (на диск пишется реже). Нужен калибровке,
+     * чтобы считать шаги между "Старт" и "Стоп" без отставания.
+     */
+    static volatile int liveOwn = -1;
+    static volatile String liveDay = "";
+
+    /** Актуальный счёт своего алгоритма за сегодня: из памяти службы, если она работает, иначе с диска. */
+    static int ownNow(Store s) {
+        String d = Store.today();
+        return (d.equals(liveDay) && liveOwn >= 0) ? liveOwn : s.own(d);
+    }
+
     private final Runnable periodic = new Runnable() {
         @Override public void run() {
             rollDayIfNeeded();
@@ -58,6 +71,8 @@ public class StepService extends Service implements SensorEventListener {
         sm = (SensorManager) getSystemService(SENSOR_SERVICE);
         day = Store.today();
         ownToday = store.own(day);
+        liveDay = day;
+        liveOwn = ownToday;
 
         if (Build.VERSION.SDK_INT >= 26) {
             nm.createNotificationChannel(new NotificationChannel(
@@ -100,6 +115,7 @@ public class StepService extends Service implements SensorEventListener {
             int s = detector.feed(e.timestamp, e.values[0], e.values[1], e.values[2]);
             if (s > 0) {
                 ownToday += s;
+                liveOwn = ownToday;
                 unsaved += s;
                 // Пишем на диск не на каждый шаг, а каждые 10 шагов
                 if (unsaved >= 10) flush();
@@ -122,6 +138,8 @@ public class StepService extends Service implements SensorEventListener {
             flush();
             day = d;
             ownToday = store.own(day);
+            liveDay = day;
+            liveOwn = ownToday;
             Engine.settle(this); // новый день: подводим итоги вчерашнего
         }
     }
@@ -163,6 +181,7 @@ public class StepService extends Service implements SensorEventListener {
         sm.unregisterListener(this);
         handler.removeCallbacksAndMessages(null);
         flush();
+        liveOwn = -1; // служба остановлена: правдой снова становится диск
         super.onDestroy();
     }
 
