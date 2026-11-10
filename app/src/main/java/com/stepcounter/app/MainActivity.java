@@ -67,6 +67,8 @@ public class MainActivity extends Activity {
     private Store store;
     private FoodBook food;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private TextView weatherView;
+    private Button weatherBtn;
 
     private final View[] pages = new View[TABS];
     private final TextView[] navItems = new TextView[TABS];
@@ -438,6 +440,30 @@ public class MainActivity extends Activity {
             @Override public void onClick(View v) { showGoalDialog(); }
         }), lp(MATCH, WRAP, 16));
         page.addView(goal);
+
+        LinearLayout wx = card();
+        TextView wTitle = tv(18, TEXT, true);
+        wTitle.setText("Плохая погода");
+        wx.addView(wTitle);
+        TextView wInfo = tv(13, MUTED, false);
+        wInfo.setText("За день до плохой погоды цель можно смягчить или снять: по прогнозу (кнопка ниже) "
+                + "или по коду от ИИ-судьи (DEEPSEEK_PROMPT.md). Только на завтра; при внезапной болезни экстренный код на сегодня до "
+                + WaiverPolicy.EMERGENCY_CUTOFF_HOUR + ":00 (смягчить вдвое, раз в " + WaiverPolicy.EMERGENCY_GAP_DAYS + " дней). Остальное: один вопрос на день, не чаще раза в "
+                + WaiverPolicy.MIN_GAP_DAYS + " дней и не более " + WaiverPolicy.MAX_PER_30_DAYS + " раз за 30 дней.");
+        wx.addView(wInfo, lp(WRAP, WRAP, 6));
+        weatherView = tv(13, TEXT, false);
+        wx.addView(weatherView, lp(WRAP, WRAP, 8));
+        weatherBtn = pill("Проверить завтра", true, new View.OnClickListener() {
+            @Override public void onClick(View v) { askWeather(false); }
+        });
+        wx.addView(weatherBtn, lp(MATCH, WRAP, 14));
+        wx.addView(pill("Экстренно: тяжёлая погода сегодня", false, new View.OnClickListener() {
+            @Override public void onClick(View v) { askWeather(true); }
+        }), lp(MATCH, WRAP, 8));
+        wx.addView(pill("Ввести код от ИИ", false, new View.OnClickListener() {
+            @Override public void onClick(View v) { askCode(); }
+        }), lp(MATCH, WRAP, 8));
+        page.addView(wx);
 
         LinearLayout prof = card();
         TextView pTitle = tv(18, TEXT, true);
@@ -1099,6 +1125,7 @@ public class MainActivity extends Activity {
         renderFood(t);
         renderTotals(c, t, today);
         renderGoal(c, today);
+        renderWeather();
         renderHistory();
         renderCalibration();
     }
@@ -1124,9 +1151,12 @@ public class MainActivity extends Activity {
         if (t.active && t.goal > 0) p = Math.min(1f, (float) t.steps / t.goal);
         setFill(barFill, p);
         barFillBg.setColor(done ? TEAL : GOLD);
-        if (t.active && t.goal > 0) {
+        if (t.active && t.waiver.equals("FULL")) {
+            pctView.setText("");
+            goalEndView.setText("цель снята погодой");
+        } else if (t.active && t.goal > 0) {
             pctView.setText(Math.round(p * 100) + "%");
-            goalEndView.setText("цель " + Fmt.num(t.goal));
+            goalEndView.setText("цель " + Fmt.num(t.goal) + (t.waiver.equals("SOFT") ? " (погода)" : ""));
         } else {
             pctView.setText("");
             goalEndView.setText("");
@@ -1151,6 +1181,11 @@ public class MainActivity extends Activity {
             missingView.setTextColor(CORAL);
             moneyView.setText(Fmt.penalty(t.penaltyMinor));
             moneyView.setTextColor(CORAL);
+        } else if (t.waiver.equals("FULL")) {
+            missingView.setText("Выходной по погоде");
+            missingView.setTextColor(TEAL);
+            moneyView.setText("0 ₽");
+            moneyView.setTextColor(TEAL);
         } else {
             missingView.setText("Цель выполнена (" + Fmt.num(t.goal) + ")");
             missingView.setTextColor(TEAL);
@@ -1322,11 +1357,72 @@ public class MainActivity extends Activity {
         compareView.setText(cmp.toString());
     }
 
+    private void askWeather(final boolean today) {
+        weatherBtn.setEnabled(false);
+        weatherBtn.setText("Проверяю прогноз...");
+        final android.content.Context ctx = getApplicationContext();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final String msg = Engine.requestWaiver(ctx, today);
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        weatherBtn.setEnabled(true);
+                        weatherBtn.setText("Проверить завтра");
+                        new AlertDialog.Builder(MainActivity.this).setTitle("Погода")
+                                .setMessage(msg).setPositiveButton("Понятно", null).show();
+                        render();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private void askCode() {
+        final EditText in = new EditText(this);
+        in.setHint("PG1111F482-37");
+        new AlertDialog.Builder(this).setTitle("Код послабления на завтра").setView(in)
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Применить", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        final String code = in.getText().toString();
+                        final android.content.Context ctx = getApplicationContext();
+                        new Thread(new Runnable() {
+                            @Override public void run() {
+                                final String msg = Engine.redeemCode(ctx, code);
+                                runOnUiThread(new Runnable() {
+                                    @Override public void run() {
+                                        new AlertDialog.Builder(MainActivity.this).setTitle("Код")
+                                                .setMessage(msg).setPositiveButton("Понятно", null).show();
+                                        render();
+                                    }
+                                });
+                            }
+                        }).start();
+                    }
+                }).show();
+    }
+
+    private void renderWeather() {
+        List<String[]> log = Engine.waiverLog(this, 5);
+        if (log.isEmpty()) {
+            weatherView.setText("Решений пока нет.");
+            return;
+        }
+        StringBuilder b = new StringBuilder();
+        DateTimeFormatter f = DateTimeFormatter.ofPattern("dd.MM");
+        for (String[] r : log) {
+            if (b.length() > 0) b.append('\n');
+            b.append(LocalDate.parse(r[1]).format(f)).append(": ").append(WaiverPolicy.describe(r[2]));
+            if (!r[2].equals("NONE")) b.append(" (").append(r[3]).append(')');
+        }
+        weatherView.setText(b.toString());
+    }
+
     private void renderHistory() {
         List<Settler.Result> hist = Engine.history(this, 14);
         StringBuilder sig = new StringBuilder();
         for (Settler.Result r : hist) {
-            sig.append(r.day).append(r.steps).append(r.met).append(r.penaltyMinor).append(';');
+            sig.append(r.day).append(r.steps).append(r.met).append(r.penaltyMinor).append(r.waiver).append(';');
         }
         if (sig.toString().equals(lastHistorySig)) return;
         lastHistorySig = sig.toString();
@@ -1358,6 +1454,11 @@ public class MainActivity extends Activity {
                 TextView miss = tv(12, MUTED, false);
                 miss.setText("не хватило " + Fmt.num(r.goal - r.steps));
                 mid.addView(miss);
+            }
+            if (!r.waiver.equals("NONE")) {
+                TextView wv = tv(12, GOLD, false);
+                wv.setText(r.waiver.equals("FULL") ? "цель снята погодой" : "цель смягчена погодой (" + Fmt.num(r.goal) + ")");
+                mid.addView(wv);
             }
             row.addView(mid, new LinearLayout.LayoutParams(0, WRAP, 1f));
 

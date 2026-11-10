@@ -65,6 +65,18 @@ public class CoreTest {
         return Commitment.create(D1, 8000, 50000, "RUB", StepSource.HW);
     }
 
+    static String hours(String day) {
+        StringBuilder b = new StringBuilder();
+        for (int h = 0; h < 24; h++) b.append(h > 0 ? "," : "").append("\"").append(day).append(String.format("T%02d:00", h)).append("\"");
+        return b.toString();
+    }
+
+    static String rep(int v, int n) {
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < n; i++) b.append(i > 0 ? "," : "").append(v);
+        return b.toString();
+    }
+
     public static void main(String[] args) throws Exception {
         System.out.println("Штрафы за невыполненные дни");
         {
@@ -326,6 +338,72 @@ public class CoreTest {
             check("план с той же длиной шага не меняется", def.budget == same.budget);
             check("откалиброванный длинный шаг увеличивает добавку за шаги, норму не меняет",
                     longer.bonus > same.bonus && longer.norm == same.norm);
+        }
+
+        System.out.println("Погода и коды послабления");
+        {
+            java.time.LocalDate t = java.time.LocalDate.of(2026, 11, 11);
+            String code = WaiverPolicy.makeCode(t, "FULL", 482);
+            check("код собирается и разбирается", WaiverPolicy.parseCode(code, t)[0].equals("FULL"));
+            check("пробелы и нижний регистр допускаются", WaiverPolicy.parseCode(" " + code.toLowerCase() + " ", t)[1].equals("482"));
+            boolean bad = false;
+            try { WaiverPolicy.parseCode(code.substring(0, 12) + "0", t); } catch (IllegalArgumentException e) { bad = true; }
+            check("неверное контрольное число отклоняется", bad);
+            bad = false;
+            try { WaiverPolicy.parseCode(code, t.plusDays(1)); } catch (IllegalArgumentException e) { bad = true; }
+            check("код на другой день отклоняется", bad);
+            check("пример из инструкции: 11.11, снять, 482 -> PG1111F482-" + WaiverPolicy.checksum(11, 11, 482, "FULL"),
+                    code.equals("PG1111F482-" + String.format("%02d", (11 * 7 + 11 * 11 + 482 + 41 + 53) % 97)));
+            Commitment c = base();
+            Ledger l = newLedger();
+            java.time.LocalDate today = java.time.LocalDate.of(2026, 11, 10);
+            check("первый запрос разрешён", WaiverPolicy.refusal(today, today.plusDays(1), c, l.records()) == null);
+            check("не на послезавтра", WaiverPolicy.refusal(today, today.plusDays(2), c, l.records()) != null);
+            l.append("WAIVER", "2026-11-11", "SOFT", "код 001", "2026-11-10");
+            check("повтор на тот же день запрещён", WaiverPolicy.refusal(today, today.plusDays(1), c, l.records()) != null);
+            check("через 3 дня нельзя (раз в 7)", WaiverPolicy.refusal(today.plusDays(3), today.plusDays(4), c, l.records()) != null);
+            check("через 7 дней можно", WaiverPolicy.refusal(today.plusDays(7), today.plusDays(8), c, l.records()) == null);
+            l.append("WAIVER", "2026-11-18", "FULL", "код 002", "2026-11-17");
+            l.append("WAIVER", "2026-11-25", "SOFT", "код 003", "2026-11-24");
+            check("четвёртое за 30 дней запрещено", WaiverPolicy.refusal(today.plusDays(22), today.plusDays(23), c, l.records()) != null);
+            check("эффективные цели", WaiverPolicy.effectiveGoal("FULL", 8000) == 0 && WaiverPolicy.effectiveGoal("SOFT", 8001) == 4001);
+            Ledger l2 = newLedger();
+            l2.append("WAIVER", "2026-11-02", "FULL", "гроза", "2026-11-01");
+            l2.append("WAIVER", "2026-11-03", "SOFT", "мороз", "2026-11-02");
+            java.util.List<Settler.Result> r = Settler.settle(D4, base(), steps(days(9000, 0, 100), null), l2, new FakeBank());
+            check("FULL: 0 шагов, цель 0, без штрафа", r.get(1).met && r.get(1).goal == 0 && r.get(1).penaltyMinor == 0 && r.get(1).waiver.equals("FULL"));
+            check("SOFT: цель 4000, 100 шагов = штраф", !r.get(2).met && r.get(2).goal == 4000);
+            check("метка дня в журнале", Settler.waiverOfFlag(Settler.flag(true, "SOFT")).equals("SOFT") && Settler.flag(false, "NONE").equals("-"));
+            String fc = "{\"hourly\":{\"time\":[" + hours("2026-11-11") + "],\"apparent_temperature\":[" + rep(-34, 24)
+                    + "],\"precipitation\":[" + rep(0, 24) + "],\"snowfall\":[" + rep(0, 24) + "],\"wind_gusts_10m\":["
+                    + rep(5, 24) + "],\"weather_code\":[" + rep(3, 24) + "]}}";
+            check("мороз -34: FULL", WeatherRules.assess(fc, null, java.time.LocalDate.of(2026, 11, 11)).level == WeatherRules.Level.FULL);
+            String mild = fc.replace("-34", "-5");
+            check("мягкая погода: NONE", WeatherRules.assess(mild, null, java.time.LocalDate.of(2026, 11, 11)).level == WeatherRules.Level.NONE);
+            check("мороз -27: SOFT", WeatherRules.assess(fc.replace("-34", "-27"), null, java.time.LocalDate.of(2026, 11, 11)).level == WeatherRules.Level.SOFT);
+            java.time.LocalDate d11 = java.time.LocalDate.of(2026, 11, 11);
+            String wet = "{\"hourly\":{\"time\":[" + hours("2026-11-11") + "],\"apparent_temperature\":[" + rep(0, 24)
+                    + "],\"precipitation\":[" + rep(1, 24) + "],\"snowfall\":[" + rep(0, 24) + "],\"wind_gusts_10m\":["
+                    + rep(5, 24) + "],\"weather_code\":[" + rep(61, 24) + "]}}";
+            check("дождь со снегом около нуля (осадки 13 мм за окно): SOFT", WeatherRules.assess(wet, null, d11).level == WeatherRules.Level.SOFT);
+            check("мороз -23 теперь SOFT", WeatherRules.assess(fc.replace("-34", "-23"), null, d11).level == WeatherRules.Level.SOFT);
+            check("ветер 16 м/с теперь SOFT", WeatherRules.assess(mild.replace(",5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5", ",16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16"), null, d11).level == WeatherRules.Level.SOFT);
+            check("экстренно сегодня: можно только сегодня", WaiverPolicy.refusal(d11, d11, base(), newLedger().records(), true) == null
+                    && WaiverPolicy.refusal(d11, d11.plusDays(1), base(), newLedger().records(), true) != null);
+            java.time.LocalDate d10 = java.time.LocalDate.of(2026, 11, 10);
+            check("экстренный код: пример из инструкции PG1011E214-02", WaiverPolicy.makeCode(d10, "EMERG", 214).equals("PG1011E214-02"));
+            String[] em = WaiverPolicy.parseCode("PG1011E214-02", d10);
+            check("экстренный код даёт SOFT и распознаётся", em[0].equals("SOFT") && WaiverPolicy.isEmergency("pg1011e214-02") && !WaiverPolicy.isEmergency("PG1011S214-02"));
+            boolean badE = false;
+            try { WaiverPolicy.parseCode("PG1011E214-19", d10); } catch (IllegalArgumentException e) { badE = true; }
+            check("подделка буквы S->E без пересчёта отклоняется", badE);
+            Ledger le = newLedger();
+            le.append("WAIVER", "2026-11-10", "SOFT", "экстренный код 214", "2026-11-10");
+            check("второй экстренный в течение 30 дней запрещён", WaiverPolicy.emergencyRecently(le.records(), d10.plusDays(20)));
+            check("через 30 дней можно", !WaiverPolicy.emergencyRecently(le.records(), d10.plusDays(30)));
+            boolean nodata = false;
+            try { WeatherRules.assess(fc, null, java.time.LocalDate.of(2026, 11, 20)); } catch (IllegalArgumentException e) { nodata = true; }
+            check("нет данных на дату: ошибка, а не молчаливое NONE", nodata);
         }
 
         System.out.println();

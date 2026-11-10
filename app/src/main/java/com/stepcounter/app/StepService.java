@@ -158,8 +158,10 @@ public class StepService extends Service implements SensorEventListener {
         Engine.Today t = Engine.today(this);
         String line;
         if (!t.active) line = "Считаю в фоне";
+        else if (t.waiver.equals("FULL")) line = "Цель снята из-за погоды · 0 ₽";
         else if (t.missing > 0) line = "Не хватает " + Fmt.num(t.missing) + " · " + Fmt.penalty(t.penaltyMinor);
         else line = "Цель выполнена · 0 ₽";
+        if (t.active && t.waiver.equals("SOFT") && t.missing > 0) line += " · погода: цель смягчена";
         if (t.active && t.goal > 0) {
             b.setProgress(t.goal, Math.min(t.steps, t.goal), false); // полоса прогресса в шторке
         }

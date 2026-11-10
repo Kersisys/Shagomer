@@ -32,8 +32,14 @@ final class Settler {
         final int goal;
         final boolean met;
         final long penaltyMinor;
+        final String waiver; // NONE, SOFT или FULL
 
         Result(LocalDate day, int steps, int goal, boolean met, long penaltyMinor) {
+            this(day, steps, goal, met, penaltyMinor, "NONE");
+        }
+
+        Result(LocalDate day, int steps, int goal, boolean met, long penaltyMinor, String waiver) {
+            this.waiver = waiver;
             this.day = day;
             this.steps = steps;
             this.goal = goal;
@@ -61,22 +67,38 @@ final class Settler {
             }
         }
 
+        java.util.Map<LocalDate, String> waivers = WaiverPolicy.decisions(ledger.records());
         List<Result> out = new ArrayList<>();
         for (LocalDate d = last.plusDays(1); d.isBefore(today); d = d.plusDays(1)) {
             int own = steps.own(d);
             Integer hw = steps.hw(d);
             int n = c.source.pick(own, hw);
-            int goal = c.goalFor(d);
+            String w = waivers.containsKey(d) ? waivers.get(d) : "NONE";
+            int goal = WaiverPolicy.effectiveGoal(w, c.goalFor(d));
             boolean met = n >= goal;
             long penalty = met ? 0 : c.penaltyFor(d);
             ledger.append("DAY", d.toString(), String.valueOf(n), String.valueOf(goal),
                     met ? "MET" : "MISSED", String.valueOf(penalty), c.currency,
-                    diverges(own, hw) ? "DIVERGE" : "-");
-            out.add(new Result(d, n, goal, met, penalty));
+                    flag(diverges(own, hw), w));
+            out.add(new Result(d, n, goal, met, penalty, w));
         }
 
         sendPendingTransfers(ledger, pay);
         return out;
+    }
+
+    /** Пометка дня в журнале: расхождение датчиков и/или послабление. */
+    static String flag(boolean diverge, String waiver) {
+        String w = waiver.equals("SOFT") || waiver.equals("FULL") ? waiver : null;
+        if (diverge) return w == null ? "DIVERGE" : "DIVERGE+" + w;
+        return w == null ? "-" : w;
+    }
+
+    /** Уровень послабления из пометки дня. */
+    static String waiverOfFlag(String flag) {
+        if (flag.endsWith("FULL")) return "FULL";
+        if (flag.endsWith("SOFT")) return "SOFT";
+        return "NONE";
     }
 
     /** Отправляет все штрафы, по которым ещё нет подтверждённого перевода. Ошибка = повтор позже. */
