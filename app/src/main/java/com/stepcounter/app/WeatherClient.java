@@ -11,8 +11,8 @@ import java.nio.charset.StandardCharsets;
 final class WeatherClient {
     private WeatherClient() { }
 
-    static final double LAT = 56.0153, LON = 92.8932; // Красноярск
-    private static final String TZ = "Asia%2FKrasnoyarsk";
+    static final double LAT = 55.3547, LON = 86.0873; // Кемерово
+    private static final String TZ = "Asia%2FNovokuznetsk";
 
     static final class Data {
         String forecast;

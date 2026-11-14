@@ -65,6 +65,12 @@ public class CoreTest {
         return Commitment.create(D1, 8000, 50000, "RUB", StepSource.HW);
     }
 
+    static Ledger newLedgerWithShift() throws Exception {
+        Ledger l = newLedger();
+        l.append("SHIFT", "2026-11-02", "2026-11-01");
+        return l;
+    }
+
     static String hours(String day) {
         StringBuilder b = new StringBuilder();
         for (int h = 0; h < 24; h++) b.append(h > 0 ? "," : "").append("\"").append(day).append(String.format("T%02d:00", h)).append("\"");
@@ -401,6 +407,30 @@ public class CoreTest {
             le.append("WAIVER", "2026-11-10", "SOFT", "экстренный код 214", "2026-11-10");
             check("второй экстренный в течение 30 дней запрещён", WaiverPolicy.emergencyRecently(le.records(), d10.plusDays(20)));
             check("через 30 дней можно", !WaiverPolicy.emergencyRecently(le.records(), d10.plusDays(30)));
+            java.time.LocalDate t0 = java.time.LocalDate.of(2026, 11, 15);
+            Ledger ls = newLedger();
+            check("смена на завтра разрешена", WaiverPolicy.shiftRefusal(t0, t0.plusDays(1), base(), ls.records()) == null);
+            check("смена не на завтра запрещена", WaiverPolicy.shiftRefusal(t0, t0, base(), ls.records()) != null);
+            ls.append("SHIFT", "2026-11-16", "2026-11-15");
+            ls.append("SHIFT", "2026-11-17", "2026-11-16");
+            ls.append("SHIFT", "2026-11-18", "2026-11-17");
+            ls.append("SHIFT", "2026-11-19", "2026-11-18");
+            check("пятая смена в 7 дней запрещена", WaiverPolicy.shiftRefusal(t0.plusDays(4), t0.plusDays(5), base(), ls.records()) != null);
+            check("через неделю снова можно", WaiverPolicy.shiftRefusal(t0.plusDays(10), t0.plusDays(11), base(), ls.records()) == null);
+            check("смена не мешает погодному лимиту", WaiverPolicy.refusal(t0.plusDays(5), t0.plusDays(6), base(), ls.records()) == null);
+            check("смена: цель вдвое меньше", WaiverPolicy.effectiveGoal("SHIFT", 8000) == 4000);
+            java.util.List<Settler.Result> rs = Settler.settle(D4, base(), steps(days(9000, 3000, 100), null), newLedgerWithShift(), new FakeBank());
+            check("в день смены цель 4000 и метка SHIFT", rs.get(1).goal == 4000 && rs.get(1).waiver.equals("SHIFT") && !rs.get(1).met);
+            Ledger lu = newLedger();
+            check("срочная смена сегодня разрешена", WaiverPolicy.shiftRefusal(t0, t0, base(), lu.records(), true) == null);
+            check("срочная смена не на завтра", WaiverPolicy.shiftRefusal(t0, t0.plusDays(1), base(), lu.records(), true) != null);
+            lu.append("SHIFT", "2026-11-01", "2026-11-01");
+            lu.append("SHIFT", "2026-11-05", "2026-11-05");
+            lu.append("SHIFT", "2026-11-10", "2026-11-10");
+            check("четвёртая срочная за 30 дней запрещена", WaiverPolicy.shiftRefusal(t0, t0, base(), lu.records(), true) != null);
+            Ledger l15 = newLedger();
+            for (int i = 0; i < 30; i += 2) l15.append("SHIFT", java.time.LocalDate.of(2026, 10, 1).plusDays(i).toString(), "2026-09-30");
+            check("график день через день (15 из 30) проходит, 16-я тоже", WaiverPolicy.shiftRefusal(java.time.LocalDate.of(2026, 10, 30), java.time.LocalDate.of(2026, 10, 31), Commitment.create(java.time.LocalDate.of(2026, 9, 1), 8000, 50000, "RUB", StepSource.HW), l15.records()) == null);
             boolean nodata = false;
             try { WeatherRules.assess(fc, null, java.time.LocalDate.of(2026, 11, 20)); } catch (IllegalArgumentException e) { nodata = true; }
             check("нет данных на дату: ошибка, а не молчаливое NONE", nodata);

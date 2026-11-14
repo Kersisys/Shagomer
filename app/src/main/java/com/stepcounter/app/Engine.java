@@ -49,7 +49,9 @@ final class Engine {
         try {
             List<String[]> recs = ledger(ctx).records();
             for (int i = recs.size() - 1; i >= 0 && out.size() < max; i--) {
-                if (recs.get(i)[0].equals("WAIVER") && recs.get(i).length >= 5) out.add(recs.get(i));
+                String[] r = recs.get(i);
+                if (r[0].equals("WAIVER") && r.length >= 5) out.add(r);
+                else if (r[0].equals("SHIFT") && r.length >= 3) out.add(new String[] {"WAIVER", r[1], "SHIFT", "смена", r[2]});
             }
         } catch (RuntimeException ignored) { }
         return out;
@@ -119,6 +121,7 @@ final class Engine {
         int id = (int) r.day.toEpochDay(); // свой номер на каждый день, чтобы итоги не затирали друг друга
         String walked = "Прошёл " + Fmt.num(r.steps) + " из " + Fmt.num(r.goal);
         if (r.waiver.equals("SOFT")) walked += " (цель смягчена погодой)";
+        if (r.waiver.equals("SHIFT")) walked += " (рабочая смена)";
         if (r.waiver.equals("FULL")) {
             notifyUser(ctx, id, "Выходной по погоде · " + date, "Цель была снята. Прошёл " + Fmt.num(r.steps) + ". Штраф 0 ₽");
         } else if (r.met) {
@@ -197,7 +200,7 @@ final class Engine {
         store.setCommitment(c);
     }
 
-    private static final java.time.ZoneId KRAS = java.time.ZoneId.of("Asia/Krasnoyarsk");
+    private static final java.time.ZoneId KRAS = java.time.ZoneId.of("Asia/Novokuznetsk");
     private static final long MAX_CLOCK_SKEW_MS = 10 * 60 * 1000L;
 
     /**
@@ -225,7 +228,7 @@ final class Engine {
         java.time.ZoneId dev = java.time.ZoneId.systemDefault();
         if (!dev.getRules().getOffset(java.time.Instant.ofEpochMilli(now))
                 .equals(KRAS.getRules().getOffset(java.time.Instant.ofEpochMilli(now)))) {
-            return "Часовой пояс телефона не красноярский. Для проверки он должен совпадать.";
+            return "Часовой пояс телефона не совпадает с Кемерово (UTC+7). Для проверки он должен совпадать.";
         }
         LocalDate trusted = java.time.Instant.ofEpochMilli(d.serverMs).atZone(KRAS).toLocalDate();
         LocalDate target = today ? trusted : trusted.plusDays(1);
@@ -262,6 +265,42 @@ final class Engine {
         }
     }
 
+    /** Объявляет рабочую смену на ЗАВТРА (цель вдвое меньше). Блокирующий: из фонового потока. */
+    static String declareShift(Context ctx) { return declareShift(ctx, false); }
+
+    /** urgent=true: вызвали на смену сегодня, до SHIFT_URGENT_CUTOFF_HOUR по Кемерову. */
+    static String declareShift(Context ctx, boolean urgent) {
+        Store s = new Store(ctx);
+        if (s.commitment() == null) return "Сначала задайте цель.";
+        settle(ctx);
+        long srv;
+        try {
+            srv = WeatherClient.serverNow();
+        } catch (java.io.IOException e) {
+            return "Нет связи для проверки времени (" + e.getMessage() + "). Попробуйте позже.";
+        }
+        long now = System.currentTimeMillis();
+        if (Math.abs(now - srv) > MAX_CLOCK_SKEW_MS) return "Часы телефона отличаются от реального времени больше чем на 10 минут.";
+        LocalDate trusted = java.time.Instant.ofEpochMilli(srv).atZone(KRAS).toLocalDate();
+        if (urgent && java.time.Instant.ofEpochMilli(srv).atZone(KRAS).getHour() >= WaiverPolicy.SHIFT_URGENT_CUTOFF_HOUR) {
+            return "Срочную смену можно отметить только до " + WaiverPolicy.SHIFT_URGENT_CUTOFF_HOUR + ":00 по Кемерову.";
+        }
+        LocalDate target = urgent ? trusted : trusted.plusDays(1);
+        synchronized (Engine.class) {
+            try {
+                Ledger l = ledger(ctx);
+                String no = WaiverPolicy.shiftRefusal(trusted, target, s.commitment(), l.records(), urgent);
+                if (no != null) return no;
+                l.append("SHIFT", target.toString(), trusted.toString());
+                return "На " + target.format(DateTimeFormatter.ofPattern("dd.MM")) + " отмечена рабочая смена: цель "
+                        + Fmt.num(WaiverPolicy.effectiveGoal("SHIFT", s.commitment().goalFor(target))) + " шагов.";
+            } catch (Ledger.TamperedException e) {
+                s.setTampered(true);
+                return "Журнал повреждён, расчёт остановлен.";
+            }
+        }
+    }
+
     /** Применяет код послабления на ЗАВТРА (код выдаёт ИИ-судья). Блокирующий: из фонового потока. */
     static String redeemCode(Context ctx, String code) {
         Store s = new Store(ctx);
@@ -278,7 +317,7 @@ final class Engine {
         LocalDate trusted = java.time.Instant.ofEpochMilli(srv).atZone(KRAS).toLocalDate();
         boolean emerg = WaiverPolicy.isEmergency(code);
         if (emerg && java.time.Instant.ofEpochMilli(srv).atZone(KRAS).getHour() >= WaiverPolicy.EMERGENCY_CUTOFF_HOUR) {
-            return "Экстренный код принимается только до " + WaiverPolicy.EMERGENCY_CUTOFF_HOUR + ":00 по Красноярску.";
+            return "Экстренный код принимается только до " + WaiverPolicy.EMERGENCY_CUTOFF_HOUR + ":00 по Кемерову.";
         }
         LocalDate target = emerg ? trusted : trusted.plusDays(1);
         String[] parsed;

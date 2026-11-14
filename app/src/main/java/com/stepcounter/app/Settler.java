@@ -89,7 +89,7 @@ final class Settler {
 
     /** Пометка дня в журнале: расхождение датчиков и/или послабление. */
     static String flag(boolean diverge, String waiver) {
-        String w = waiver.equals("SOFT") || waiver.equals("FULL") ? waiver : null;
+        String w = waiver.equals("SOFT") || waiver.equals("FULL") || waiver.equals("SHIFT") ? waiver : null;
         if (diverge) return w == null ? "DIVERGE" : "DIVERGE+" + w;
         return w == null ? "-" : w;
     }
@@ -98,6 +98,7 @@ final class Settler {
     static String waiverOfFlag(String flag) {
         if (flag.endsWith("FULL")) return "FULL";
         if (flag.endsWith("SOFT")) return "SOFT";
+        if (flag.endsWith("SHIFT")) return "SHIFT";
         return "NONE";
     }
 

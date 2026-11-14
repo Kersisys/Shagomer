@@ -24,6 +24,7 @@ final class WaiverPolicy {
         Map<LocalDate, String> m = new LinkedHashMap<>();
         for (String[] r : recs) {
             if (r[0].equals("WAIVER") && r.length >= 3) m.put(LocalDate.parse(r[1]), r[2]);
+            if (r[0].equals("SHIFT") && r.length >= 2) m.put(LocalDate.parse(r[1]), "SHIFT");
         }
         return m;
     }
@@ -31,7 +32,7 @@ final class WaiverPolicy {
     /** Цель с учётом послабления. */
     static int effectiveGoal(String level, int goal) {
         if ("FULL".equals(level)) return 0;
-        if ("SOFT".equals(level)) return (goal + 1) / 2;
+        if ("SOFT".equals(level) || "SHIFT".equals(level)) return (goal + 1) / 2;
         return goal;
     }
 
@@ -57,7 +58,7 @@ final class WaiverPolicy {
         }
         int in30 = 0;
         for (Map.Entry<LocalDate, String> e : d.entrySet()) {
-            if (e.getValue().equals("NONE")) continue;
+            if (e.getValue().equals("NONE") || e.getValue().equals("SHIFT")) continue;
             long gap = Math.abs(ChronoUnit.DAYS.between(e.getKey(), target));
             if (gap < MIN_GAP_DAYS) {
                 return "Послабления бывают не чаще раза в " + MIN_GAP_DAYS + " дней (последнее на " + e.getKey() + ").";
@@ -68,7 +69,56 @@ final class WaiverPolicy {
         return null;
     }
 
+    static final int SHIFT_MAX_PER_7 = 4;
+    static final int SHIFT_MAX_PER_30 = 16;
+
+    /** Отказ для объявления рабочей смены на target (null = можно). Лимиты смен не смешиваются с погодными. */
+    static String shiftRefusal(LocalDate trustedToday, LocalDate target, Commitment c, List<String[]> recs) {
+        return shiftRefusal(trustedToday, target, c, recs, false);
+    }
+
+    static final int SHIFT_URGENT_CUTOFF_HOUR = 23;
+    static final int SHIFT_URGENT_MAX_PER_30 = 3;
+
+    /** urgent=true: вызвали сегодня (смена на СЕГОДНЯ), не чаще SHIFT_URGENT_MAX_PER_30 раз за 30 дней. */
+    static String shiftRefusal(LocalDate trustedToday, LocalDate target, Commitment c, List<String[]> recs,
+                               boolean urgent) {
+        if (c == null) return "Сначала задайте цель.";
+        if (!target.equals(urgent ? trustedToday : trustedToday.plusDays(1))) {
+            return urgent ? "Срочная смена только на сегодня." : "Смену можно объявить только за день до неё.";
+        }
+        if (urgent) {
+            int u = 0;
+            for (String[] r : recs) {
+                if (r[0].equals("SHIFT") && r.length >= 3 && r[1].equals(r[2])
+                        && Math.abs(ChronoUnit.DAYS.between(LocalDate.parse(r[1]), target)) < 30) u++;
+            }
+            if (u >= SHIFT_URGENT_MAX_PER_30) {
+                return "Срочных смен не более " + SHIFT_URGENT_MAX_PER_30 + " за 30 дней.";
+            }
+        }
+        if (target.isBefore(c.start)) return "Обязательство в этот день ещё не действует.";
+        Map<LocalDate, String> d = decisions(recs);
+        String cur = d.get(target);
+        if (cur != null && !cur.equals("NONE")) return "На " + target + " уже есть решение: " + describe(cur) + ".";
+        java.util.Set<LocalDate> shifts = new java.util.HashSet<>();
+        for (Map.Entry<LocalDate, String> e : d.entrySet()) if (e.getValue().equals("SHIFT")) shifts.add(e.getKey());
+        int in30 = 0;
+        for (LocalDate s : shifts) if (Math.abs(ChronoUnit.DAYS.between(s, target)) < 30) in30++;
+        if (in30 >= SHIFT_MAX_PER_30) return "Лимит смен: не более " + SHIFT_MAX_PER_30 + " за 30 дней.";
+        for (int w = -6; w <= 0; w++) {
+            int cnt = 1;
+            for (int k = 0; k < 7; k++) {
+                LocalDate day = target.plusDays(w + k);
+                if (!day.equals(target) && shifts.contains(day)) cnt++;
+            }
+            if (cnt > SHIFT_MAX_PER_7) return "Лимит смен: не более " + SHIFT_MAX_PER_7 + " в любые 7 дней.";
+        }
+        return null;
+    }
+
     static String describe(String level) {
+        if ("SHIFT".equals(level)) return "рабочая смена, цель вдвое меньше";
         if ("FULL".equals(level)) return "цель снята";
         if ("SOFT".equals(level)) return "цель вдвое меньше";
         return "погода обычная, цель без изменений";
@@ -83,7 +133,7 @@ final class WaiverPolicy {
         return (day * 7 + month * 11 + nonce + l + SALT) % 97;
     }
 
-    /** Экстренный код (болезнь сегодня) можно запросить только до этого часа, по Красноярску. */
+    /** Экстренный код (болезнь сегодня) можно запросить только до этого часа, по Кемерову. */
     static final int EMERGENCY_CUTOFF_HOUR = 18;
     static final int EMERGENCY_GAP_DAYS = 30;
 

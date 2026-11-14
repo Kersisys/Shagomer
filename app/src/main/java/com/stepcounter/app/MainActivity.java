@@ -460,6 +460,12 @@ public class MainActivity extends Activity {
         wx.addView(pill("Экстренно: тяжёлая погода сегодня", false, new View.OnClickListener() {
             @Override public void onClick(View v) { askWeather(true); }
         }), lp(MATCH, WRAP, 8));
+        wx.addView(pill("Завтра рабочая смена", false, new View.OnClickListener() {
+            @Override public void onClick(View v) { askShift(false); }
+        }), lp(MATCH, WRAP, 8));
+        wx.addView(pill("Вызвали на смену сегодня", false, new View.OnClickListener() {
+            @Override public void onClick(View v) { askShift(true); }
+        }), lp(MATCH, WRAP, 8));
         wx.addView(pill("Ввести код от ИИ", false, new View.OnClickListener() {
             @Override public void onClick(View v) { askCode(); }
         }), lp(MATCH, WRAP, 8));
@@ -1156,7 +1162,7 @@ public class MainActivity extends Activity {
             goalEndView.setText("цель снята погодой");
         } else if (t.active && t.goal > 0) {
             pctView.setText(Math.round(p * 100) + "%");
-            goalEndView.setText("цель " + Fmt.num(t.goal) + (t.waiver.equals("SOFT") ? " (погода)" : ""));
+            goalEndView.setText("цель " + Fmt.num(t.goal) + (t.waiver.equals("SOFT") ? " (погода)" : t.waiver.equals("SHIFT") ? " (смена)" : ""));
         } else {
             pctView.setText("");
             goalEndView.setText("");
@@ -1377,6 +1383,32 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    private void askShift(final boolean urgent) {
+        new AlertDialog.Builder(this).setTitle(urgent ? "Вызвали на смену сегодня?" : "Рабочая смена завтра?")
+                .setMessage((urgent ? "Цель на сегодня станет вдвое меньше (до " + WaiverPolicy.SHIFT_URGENT_CUTOFF_HOUR
+                        + ":00, не более " + WaiverPolicy.SHIFT_URGENT_MAX_PER_30 + " раз за 30 дней). " : "")
+                        + "Цель станет вдвое меньше (телефон на работе не носишь). Не более "
+                        + WaiverPolicy.SHIFT_MAX_PER_7 + " смен в 7 дней и " + WaiverPolicy.SHIFT_MAX_PER_30 + " за 30. Отменить нельзя.")
+                .setNegativeButton("Нет", null)
+                .setPositiveButton("Да, смена", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        final android.content.Context ctx = getApplicationContext();
+                        new Thread(new Runnable() {
+                            @Override public void run() {
+                                final String msg = Engine.declareShift(ctx, urgent);
+                                runOnUiThread(new Runnable() {
+                                    @Override public void run() {
+                                        new AlertDialog.Builder(MainActivity.this).setTitle("Смена")
+                                                .setMessage(msg).setPositiveButton("Понятно", null).show();
+                                        render();
+                                    }
+                                });
+                            }
+                        }).start();
+                    }
+                }).show();
+    }
+
     private void askCode() {
         final EditText in = new EditText(this);
         in.setHint("PG1111F482-37");
@@ -1457,7 +1489,9 @@ public class MainActivity extends Activity {
             }
             if (!r.waiver.equals("NONE")) {
                 TextView wv = tv(12, GOLD, false);
-                wv.setText(r.waiver.equals("FULL") ? "цель снята погодой" : "цель смягчена погодой (" + Fmt.num(r.goal) + ")");
+                wv.setText(r.waiver.equals("FULL") ? "цель снята погодой"
+                        : r.waiver.equals("SHIFT") ? "рабочая смена, цель " + Fmt.num(r.goal)
+                        : "цель смягчена погодой (" + Fmt.num(r.goal) + ")");
                 mid.addView(wv);
             }
             row.addView(mid, new LinearLayout.LayoutParams(0, WRAP, 1f));
